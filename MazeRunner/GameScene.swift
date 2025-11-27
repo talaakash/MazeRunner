@@ -9,35 +9,19 @@ import SpriteKit
 
 class GameScene: SKScene {
     
-    private let player = SKSpriteNode(imageNamed: "run1")
-    
-    private let playerMovePerSecond: CGFloat = 200
-    private var velocity: CGPoint = .zero
+    private let config: MazeConfig
+    private let mazeContainer = SKNode()
+    private var player = SKSpriteNode()
     
     private var lastTouchLocation: CGPoint?
-    private var isMovementIsValid: Bool = false
+    private var isMovementAllowed: Bool = false
     
     var giftTimer: TimeInterval = 0
     
     var WALL_SIZE: CGFloat = 50.0
-    let MAP_ROWS = 11
-    let MAP_COLS = 17
-    let levelMap: [[Int]] = [
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [2, 0, 0, 4, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3],
-        [1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 4, 0, 1, 0, 1, 0, 1],
-        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1],
-        [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1],
-        [1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1],
-        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1],
-        [1, 0, 1, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-    ]
-    let mazeContainer = SKNode()
     
-    override init(size: CGSize) {
+    init(size: CGSize, config: MazeConfig) {
+        self.config = config
         super.init(size: size)
     }
     
@@ -46,50 +30,28 @@ class GameScene: SKScene {
     }
     
     override func didMove(to view: SKView) {
-        super.didMove(to: view)
         physicsWorld.contactDelegate = self
         
         WALL_SIZE = calculateOptimalWallSize()
-        let background = SKSpriteNode(imageNamed: "tile_floor")
-        background.position = CGPoint(x: size.width / 2, y: size.height / 2)
-        background.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        background.zPosition = -1
-        background.size = CGSize(width: size.width, height: size.height)
-        addChild(background)
+        
+        let bg = SKSpriteNode(imageNamed: config.floorTextureName)
+        bg.position = CGPoint(x: size.width/2, y: size.height/2)
+        bg.zPosition = -1
+        bg.size = size
+        addChild(bg)
         
         addChild(mazeContainer)
         createLevel()
     }
     
     override func update(_ currentTime: TimeInterval) {
-        guard let target = lastTouchLocation else {
-            // No target — stop movement
-            player.physicsBody?.velocity = .zero
-            stopWalkAnimation()
-            return
-        }
-        
-        // Compute vector to target
-        let offset = target - player.position
-        let distance = offset.length()
-        
-        if distance < 2 {
-            player.physicsBody?.velocity = .zero
-            velocity = .zero
-            stopWalkAnimation()
-        } else {
-            moveSprite(sprite: player, velocity: velocity)
-        }
-        
         giftTimer += 1/60
         
         if giftTimer >= 1.0 {
             giftTimer = 0
-            
             for node in mazeContainer.children where node is GiftNode {
                 let gift = node as! GiftNode
                 gift.tick()
-                
                 if gift.remainingTime <= 0 {
                     gift.removeFromParent()
                 }
@@ -100,79 +62,75 @@ class GameScene: SKScene {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         
-        let touchLocation = touch.location(in: mazeContainer)
+        let location = touch.location(in: mazeContainer)
+        if isWall(at: location) { return }
         
-        if isWall(at: touchLocation) { return }
-        self.isMovementIsValid = true
+        lastTouchLocation = location
+        isMovementAllowed = true
+        startWalkAnimation()
     }
     
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first, self.isMovementIsValid else { return }
+        guard isMovementAllowed, let touch = touches.first else { return }
         
-        let touchLocation = touch.location(in: mazeContainer)
+        let location = touch.location(in: mazeContainer)
         
-        if isWall(at: touchLocation) || (touchLocation.x < 0 || touchLocation.x > (CGFloat(MAP_COLS) * WALL_SIZE)) {
-            player.physicsBody?.velocity = .zero
-            velocity = .zero
+        if isWall(at: location) {
             stopWalkAnimation()
-            self.isMovementIsValid = false
+            player.physicsBody?.velocity = .zero
+            isMovementAllowed = false
             return
         }
-        lastTouchLocation = touchLocation
-        movePlayerTowards(location: touchLocation)
+        
+        lastTouchLocation = location
+        applyMovementToward(location)
     }
+    
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        isMovementAllowed = false
+        player.physicsBody?.velocity = .zero
+        stopWalkAnimation()
+    }
+    
+    private func applyMovementToward(_ location: CGPoint) {
+        
+        let dx = location.x - player.position.x
+        let dy = location.y - player.position.y
+        let distance = sqrt(dx*dx + dy*dy)
+        
+        // Avoid division by zero
+        guard distance > 4 else {
+            player.physicsBody?.velocity = .zero
+            stopWalkAnimation()
+            return
+        }
+        
+        // Normalize movement vector
+        let ux = dx / distance
+        let uy = dy / distance
+        
+        // Apply fixed-speed velocity
+        let vx = ux * config.playerSpeed
+        let vy = uy * config.playerSpeed
+        
+        player.physicsBody?.velocity = CGVector(dx: vx, dy: vy)
+        
+        // Flip sprite direction
+        player.xScale = ux >= 0 ? abs(player.xScale) : -abs(player.xScale)
+        
+        startWalkAnimation()
+    }
+    
 }
 
 extension GameScene {
-    private func moveSprite(sprite: SKSpriteNode, velocity: CGPoint) {
-        player.physicsBody?.velocity = CGVector(dx: velocity.x * 0.92, dy: velocity.y * 0.92)
-    }
-    
-    private func movePlayerTowards(location: CGPoint) {
-        let offset = CGPoint(x: location.x - player.position.x, y: location.y - player.position.y)
-        
-        let length = offset.length()
-        guard length > 0 else { return }
-        
-        let direction = CGPoint(x: offset.x / length, y: offset.y / length)
-        
-        if direction.x > 0 {
-            player.xScale = abs(player.xScale)
-        } else {
-            player.xScale = -abs(player.xScale)
-        }
-        
-        velocity = CGPoint(x: direction.x * playerMovePerSecond, y: direction.y * playerMovePerSecond)
-        
-        if player.action(forKey: "walk") == nil {
-            startWalkAnimation()
-        }
-    }
     
     private func startWalkAnimation() {
-        let textures = [
-            SKTexture(imageNamed: "run1"),
-            SKTexture(imageNamed: "run2"),
-            SKTexture(imageNamed: "run3"),
-            SKTexture(imageNamed: "run4"),
-            SKTexture(imageNamed: "run5"),
-            SKTexture(imageNamed: "run6"),
-            SKTexture(imageNamed: "run7"),
-            SKTexture(imageNamed: "run8"),
-            SKTexture(imageNamed: "run9"),
-            SKTexture(imageNamed: "run10"),
-            SKTexture(imageNamed: "run11"),
-            SKTexture(imageNamed: "run12"),
-            SKTexture(imageNamed: "run13"),
-            SKTexture(imageNamed: "run14"),
-            SKTexture(imageNamed: "run15"),
-            SKTexture(imageNamed: "run16"),
-        ]
+        if player.action(forKey: "walk") != nil { return }
         
-        let walkAction = SKAction.animate(with: textures, timePerFrame: 0.08)
-        let repeatAction = SKAction.repeatForever(walkAction)
-        
-        player.run(repeatAction, withKey: "walk")
+        let textures = (1...16).map { SKTexture(imageNamed: "run\($0)") }
+        let act = SKAction.repeatForever(.animate(with: textures, timePerFrame: 0.08))
+        player.run(act, withKey: "walk")
     }
     
     private func stopWalkAnimation() {
@@ -180,131 +138,133 @@ extension GameScene {
     }
     
     private func createLevel() {
-        let totalMazeWidth = CGFloat(MAP_COLS) * WALL_SIZE
-        let totalMazeHeight = CGFloat(MAP_ROWS) * WALL_SIZE
         
-        // Center the container node on the screen
+        let totalWidth = CGFloat(config.map_cols) * WALL_SIZE
+        let totalHeight = CGFloat(config.map_rows) * WALL_SIZE
+        
         mazeContainer.position = CGPoint(
-            x: (size.width - totalMazeWidth) / 2.0,
-            y: (size.height - totalMazeHeight) / 2.0
+            x: (size.width - totalWidth)/2,
+            y: (size.height - totalHeight)/2
         )
         
+        mazeContainer.physicsBody = SKPhysicsBody(
+            edgeLoopFrom: CGRect(x: 0, y: 0,
+                                 width: totalWidth,
+                                 height: totalHeight)
+        )
+        mazeContainer.physicsBody?.isDynamic = false
+        mazeContainer.physicsBody?.categoryBitMask = PhysicsCategory.wall
+        mazeContainer.physicsBody?.collisionBitMask = PhysicsCategory.player
         
-        // Get the texture for the wall and path
-        let wallTexture = SKTexture(imageNamed: "tile_wall")
-        let exitTexture = SKTexture(imageNamed: "joystick_base")
-        var giftRemainingTime: Int = 5
+        let wallTex = SKTexture(imageNamed: config.wallTextureName)
+        let exitTex = SKTexture(imageNamed: config.exitTextureName)
         
-        // Iterate over the rows (i.e., the y-axis)
-        for (row, columnArray) in levelMap.enumerated() {
-            
-            // Iterate over the columns in the current row (i.e., the x-axis)
-            for (col, mapValue) in columnArray.enumerated() {
+        var giftTime = 5
+        
+        for (row, cols) in config.map.enumerated() {
+            for (col, value) in cols.enumerated() {
                 
-                var node: SKNode? = nil
-                let position = CGPoint(
-                    x: CGFloat(col) * WALL_SIZE + (WALL_SIZE / 2),
-                    y: (CGFloat(MAP_ROWS) - 1 - CGFloat(row)) * WALL_SIZE + (WALL_SIZE / 2)
+                let pos = CGPoint(
+                    x: CGFloat(col) * WALL_SIZE + WALL_SIZE/2,
+                    y: (CGFloat(config.map_rows - 1 - row)) * WALL_SIZE + WALL_SIZE/2
                 )
                 
-                let size = CGSize(width: WALL_SIZE, height: WALL_SIZE)
-                if mapValue == 1 {
-                    node = SKSpriteNode(texture: wallTexture, size: size)
-                    node?.name = "wall"
-                    node?.physicsBody = SKPhysicsBody(rectangleOf: size)
-                    node?.physicsBody?.isDynamic = false
-                    node?.physicsBody?.categoryBitMask = PhysicsCategory.wall
-                    node?.physicsBody?.restitution = 0
-                    node?.physicsBody?.friction = 0
-                    node?.physicsBody?.allowsRotation = false
-                } else if mapValue == 2 {
-                    player.size = CGSize(width: WALL_SIZE, height: WALL_SIZE)
-                    player.position = position
-                    player.physicsBody = SKPhysicsBody(texture: player.texture!, size: size)
+                let cellSize = CGSize(width: WALL_SIZE, height: WALL_SIZE)
+                var node: SKNode?
+                
+                switch value {
+                    
+                case 1:
+                    let wall = SKSpriteNode(texture: wallTex, size: cellSize)
+                    wall.name = "wall"
+                    wall.physicsBody = SKPhysicsBody(rectangleOf: cellSize)
+                    wall.physicsBody?.isDynamic = false
+                    wall.physicsBody?.categoryBitMask = PhysicsCategory.wall
+                    node = wall
+                case 2:
+                    player = SKSpriteNode(imageNamed: "\(config.playerTexturePrefix)1")
+                    player.size = cellSize
+                    player.position = pos
+                    player.physicsBody = SKPhysicsBody(texture: player.texture!, size: cellSize)
                     player.physicsBody?.allowsRotation = false
                     player.physicsBody?.affectedByGravity = false
-                    player.physicsBody?.restitution = 0
-                    player.physicsBody?.friction = 0
-                    player.physicsBody?.linearDamping = 4
-                    player.physicsBody?.usesPreciseCollisionDetection = true
+                    player.physicsBody?.linearDamping = 5
                     player.physicsBody?.categoryBitMask = PhysicsCategory.player
                     player.physicsBody?.collisionBitMask = PhysicsCategory.wall
-                    player.physicsBody?.contactTestBitMask = PhysicsCategory.exit
+                    player.physicsBody?.contactTestBitMask = PhysicsCategory.exit | PhysicsCategory.gift
                     node = player
-                } else if mapValue == 3 {
-                    node = SKSpriteNode(texture: exitTexture, size: size)
-                    node?.name = "exit"
-                    node?.physicsBody = SKPhysicsBody(rectangleOf: size)
-                    node?.physicsBody?.isDynamic = false
-                    node?.physicsBody?.categoryBitMask = PhysicsCategory.exit
-                } else if mapValue == 4 {
+                case 3:
+                    let exit = SKSpriteNode(texture: exitTex, size: cellSize)
+                    exit.name = "exit"
+                    exit.physicsBody = SKPhysicsBody(rectangleOf: cellSize)
+                    exit.physicsBody?.isDynamic = false
+                    exit.physicsBody?.categoryBitMask = PhysicsCategory.exit
+                    node = exit
+                case 4:
                     let gift = GiftNode()
-                    gift.position = position
+                    gift.position = pos
                     gift.name = "gift"
-                    gift.remainingTime = giftRemainingTime
-                    giftRemainingTime += 5
+                    gift.remainingTime = giftTime
+                    giftTime += 5
                     node = gift
+                default: break
                 }
                 
-                if let newNode = node {
-                    newNode.position = position
-                    mazeContainer.addChild(newNode)
+                if let n = node {
+                    n.position = pos
+                    mazeContainer.addChild(n)
                 }
             }
         }
     }
     
     private func calculateOptimalWallSize() -> CGFloat {
-        let totalCols = CGFloat(MAP_COLS)
-        let totalRows = CGFloat(MAP_ROWS)
-        
-        let sceneWidth = size.width
-        let sceneHeight = size.height
-        
-        let maxWallSizeByWidth = sceneWidth / totalCols
-        let maxWallSizeByHeight = sceneHeight / totalRows
-        let optimalSize = min(maxWallSizeByWidth, maxWallSizeByHeight) - 2.0
-        return max(10.0, optimalSize)
+        let w = size.width / CGFloat(config.map_cols)
+        let h = size.height / CGFloat(config.map_rows)
+        return max(10, min(w, h) - 2)
     }
     
     private func isWall(at location: CGPoint) -> Bool {
-        let touchedNodes = mazeContainer.nodes(at: location)
-        return touchedNodes.contains(where: { $0.name == "wall" })
+        mazeContainer.nodes(at: location).contains { $0.name == "wall" }
     }
 }
 
 extension GameScene: SKPhysicsContactDelegate {
     func didBegin(_ contact: SKPhysicsContact) {
-        let bodyA = contact.bodyA
-        let bodyB = contact.bodyB
         
-        let categories = (bodyA.categoryBitMask, bodyB.categoryBitMask)
+        let a = contact.bodyA
+        let b = contact.bodyB
         
-        // Player reached exit
-        if categories == (PhysicsCategory.player, PhysicsCategory.exit) ||
-            categories == (PhysicsCategory.exit, PhysicsCategory.player) {
-            print("EXIT REACHED — LEVEL COMPLETE")
-            return
+        let combo = (a.categoryBitMask, b.categoryBitMask)
+        
+        if combo == (PhysicsCategory.player, PhysicsCategory.exit)
+            || combo == (PhysicsCategory.exit, PhysicsCategory.player) {
+            
+            print("LEVEL EXITED")
         }
         
-        // Player collects gift
-        if categories == (PhysicsCategory.player, PhysicsCategory.gift) ||
-            categories == (PhysicsCategory.gift, PhysicsCategory.player) {
+        if combo == (PhysicsCategory.player, PhysicsCategory.gift)
+            || combo == (PhysicsCategory.gift, PhysicsCategory.player) {
+            let giftNode = (a.categoryBitMask == PhysicsCategory.gift) ? a.node : b.node
+            giftNode?.physicsBody?.categoryBitMask = 0
+            giftNode?.physicsBody?.contactTestBitMask = 0
+            giftNode?.physicsBody?.collisionBitMask = 0
             
-            let giftNode = (bodyA.categoryBitMask == PhysicsCategory.gift)
-            ? bodyA.node
-            : bodyB.node
+            giftNode?.run(.sequence([
+                .wait(forDuration: 0.01),
+                .removeFromParent()
+            ]))
             
-            giftNode?.removeFromParent()
-            print("GIFT COLLECTED 🎁")
+            print("GIFT ACQUIRED")
         }
+        
     }
 }
 
 struct PhysicsCategory {
-    static let none: UInt32  = 0
-    static let player: UInt32 = 0b1 // 1
-    static let wall: UInt32   = 0b10 // 2
-    static let exit: UInt32   = 0b100 // 4
-    static let gift: UInt32    = 0b1000
+    static let none: UInt32 = 0
+    static let player: UInt32 = 1
+    static let wall: UInt32 = 2
+    static let exit: UInt32 = 4
+    static let gift: UInt32 = 8
 }

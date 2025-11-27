@@ -10,9 +10,33 @@
 		843204572ED56A2E0032D665 /* MazeRunner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MazeRunner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		845B17122ED868BA00542485 /* Exceptions for "MazeRunner" folder in "MazeRunner" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Readme.md,
+			);
+			target = 843204562ED56A2E0032D665 /* MazeRunner */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+		845B17132ED868BA00542485 /* Exceptions for "MazeRunner" folder in "Compile Sources" phase from "MazeRunner" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			buildPhase = 843204532ED56A2E0032D665 /* Sources */;
+			membershipExceptions = (
+				Readme.md,
+			);
+		};
+/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		843204592ED56A2E0032D665 /* MazeRunner */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				845B17122ED868BA00542485 /* Exceptions for "MazeRunner" folder in "MazeRunner" target */,
+				845B17132ED868BA00542485 /* Exceptions for "MazeRunner" folder in "Compile Sources" phase from "MazeRunner" target */,
+			);
 			path = MazeRunner;
 			sourceTree = "<group>";
 		};
