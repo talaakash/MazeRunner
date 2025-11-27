@@ -9,40 +9,35 @@ import SpriteKit
 
 class GameScene: SKScene {
     
-    private let playableRect: CGRect
     private let player = SKSpriteNode(imageNamed: "run1")
-    
-    private var lastUpdateTime: TimeInterval = 0.0
-    private var dt: TimeInterval = 0.0
     
     private let playerMovePerSecond: CGFloat = 200
     private var velocity: CGPoint = .zero
     
     private var lastTouchLocation: CGPoint?
+    private var isMovementIsValid: Bool = false
+    
+    var giftTimer: TimeInterval = 0
     
     var WALL_SIZE: CGFloat = 50.0
     let MAP_ROWS = 11
     let MAP_COLS = 17
     let levelMap: [[Int]] = [
         [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [2, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3],
+        [2, 0, 0, 4, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3],
         [1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 4, 0, 1, 0, 1, 0, 1],
         [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1],
         [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1],
         [1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1],
         [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1],
         [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1],
-        [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
         [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     ]
     let mazeContainer = SKNode()
     
     override init(size: CGSize) {
-        let maxAspectRatio = 16.0 / 9.0
-        let playableHeight = size.width / maxAspectRatio
-        let playableMargin = (size.height / playableHeight) / 2.0
-        playableRect = CGRect(x: 0, y: playableMargin, width: size.width, height: playableHeight)
         super.init(size: size)
     }
     
@@ -67,37 +62,37 @@ class GameScene: SKScene {
     }
     
     override func update(_ currentTime: TimeInterval) {
-        if lastUpdateTime > 0 {
-            dt = currentTime - lastUpdateTime
-        } else {
-            dt = 0
+        guard let target = lastTouchLocation else {
+            // No target — stop movement
+            player.physicsBody?.velocity = .zero
+            stopWalkAnimation()
+            return
         }
-        lastUpdateTime = currentTime
         
-        if let lastTouchLocation {
-            //            let diffrence = lastTouchLocation - player.position
-            //            if (diffrence.length() <= playerMovePerSecond * dt) {
-            //                player.position = lastTouchLocation
-            //                velocity = .zero
-            //            } else {
-            //                moveSprite(sprite: player, velocity: velocity)
-            //            }
-            //            if diffrence.length() <= playerMovePerSecond * dt {
-            //                player.position = lastTouchLocation
-            //                velocity = .zero
-            //                stopWalkAnimation()
-            //            } else {
-            //                moveSprite(sprite: player, velocity: velocity)
-            //            }
-            let delta = lastTouchLocation - player.position
-            let distance = delta.length()
+        // Compute vector to target
+        let offset = target - player.position
+        let distance = offset.length()
+        
+        if distance < 2 {
+            player.physicsBody?.velocity = .zero
+            velocity = .zero
+            stopWalkAnimation()
+        } else {
+            moveSprite(sprite: player, velocity: velocity)
+        }
+        
+        giftTimer += 1/60
+        
+        if giftTimer >= 1.0 {
+            giftTimer = 0
             
-            if distance < playerMovePerSecond * dt {
-                player.position = lastTouchLocation
-                velocity = .zero
-                stopWalkAnimation()
-            } else {
-                moveSprite(sprite: player, velocity: velocity)
+            for node in mazeContainer.children where node is GiftNode {
+                let gift = node as! GiftNode
+                gift.tick()
+                
+                if gift.remainingTime <= 0 {
+                    gift.removeFromParent()
+                }
             }
         }
     }
@@ -105,19 +100,24 @@ class GameScene: SKScene {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         
-        //        let touchLocation = touch.location(in: self)
         let touchLocation = touch.location(in: mazeContainer)
         
-        lastTouchLocation = touchLocation
-        movePlayerTowards(location: touchLocation)
+        if isWall(at: touchLocation) { return }
+        self.isMovementIsValid = true
     }
     
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else { return }
+        guard let touch = touches.first, self.isMovementIsValid else { return }
         
-        //        let touchLocation = touch.location(in: self)
         let touchLocation = touch.location(in: mazeContainer)
         
+        if isWall(at: touchLocation) || (touchLocation.x < 0 || touchLocation.x > (CGFloat(MAP_COLS) * WALL_SIZE)) {
+            player.physicsBody?.velocity = .zero
+            velocity = .zero
+            stopWalkAnimation()
+            self.isMovementIsValid = false
+            return
+        }
         lastTouchLocation = touchLocation
         movePlayerTowards(location: touchLocation)
     }
@@ -125,11 +125,7 @@ class GameScene: SKScene {
 
 extension GameScene {
     private func moveSprite(sprite: SKSpriteNode, velocity: CGPoint) {
-//        let amountToMove = CGPoint(x: velocity.x * CGFloat(dt), y: velocity.y * CGFloat(dt))
-//        let proposedPosition = CGPoint(x: sprite.position.x + amountToMove.x, y: sprite.position.y + amountToMove.y)
-        //        sprite.position = proposedPosition
-        player.physicsBody?.velocity = CGVector(dx: velocity.x, dy: velocity.y)
-        
+        player.physicsBody?.velocity = CGVector(dx: velocity.x * 0.92, dy: velocity.y * 0.92)
     }
     
     private func movePlayerTowards(location: CGPoint) {
@@ -181,10 +177,9 @@ extension GameScene {
     
     private func stopWalkAnimation() {
         player.removeAction(forKey: "walk")
-        player.texture = SKTexture(imageNamed: "run1")
     }
     
-    func createLevel() {
+    private func createLevel() {
         let totalMazeWidth = CGFloat(MAP_COLS) * WALL_SIZE
         let totalMazeHeight = CGFloat(MAP_ROWS) * WALL_SIZE
         
@@ -198,6 +193,7 @@ extension GameScene {
         // Get the texture for the wall and path
         let wallTexture = SKTexture(imageNamed: "tile_wall")
         let exitTexture = SKTexture(imageNamed: "joystick_base")
+        var giftRemainingTime: Int = 5
         
         // Iterate over the rows (i.e., the y-axis)
         for (row, columnArray) in levelMap.enumerated() {
@@ -205,42 +201,49 @@ extension GameScene {
             // Iterate over the columns in the current row (i.e., the x-axis)
             for (col, mapValue) in columnArray.enumerated() {
                 
-                var node: SKSpriteNode? = nil
+                var node: SKNode? = nil
                 let position = CGPoint(
                     x: CGFloat(col) * WALL_SIZE + (WALL_SIZE / 2),
                     y: (CGFloat(MAP_ROWS) - 1 - CGFloat(row)) * WALL_SIZE + (WALL_SIZE / 2)
                 )
                 
+                let size = CGSize(width: WALL_SIZE, height: WALL_SIZE)
                 if mapValue == 1 {
-                    // **Wall Block**
-                    node = SKSpriteNode(texture: wallTexture, size: CGSize(width: WALL_SIZE, height: WALL_SIZE))
+                    node = SKSpriteNode(texture: wallTexture, size: size)
                     node?.name = "wall"
-                    
-                    // Add the physics body for collision (critical for walls)
-                    node?.physicsBody = SKPhysicsBody(rectangleOf: node!.size)
-                    node?.physicsBody?.isDynamic = false // Walls should not move
+                    node?.physicsBody = SKPhysicsBody(rectangleOf: size)
+                    node?.physicsBody?.isDynamic = false
                     node?.physicsBody?.categoryBitMask = PhysicsCategory.wall
-                    
+                    node?.physicsBody?.restitution = 0
+                    node?.physicsBody?.friction = 0
+                    node?.physicsBody?.allowsRotation = false
                 } else if mapValue == 2 {
                     player.size = CGSize(width: WALL_SIZE, height: WALL_SIZE)
                     player.position = position
-                    player.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: player.size.width * 0.6, height: player.size.height * 0.6))
-                    
+                    player.physicsBody = SKPhysicsBody(texture: player.texture!, size: size)
                     player.physicsBody?.allowsRotation = false
                     player.physicsBody?.affectedByGravity = false
-                    
+                    player.physicsBody?.restitution = 0
+                    player.physicsBody?.friction = 0
+                    player.physicsBody?.linearDamping = 4
+                    player.physicsBody?.usesPreciseCollisionDetection = true
                     player.physicsBody?.categoryBitMask = PhysicsCategory.player
                     player.physicsBody?.collisionBitMask = PhysicsCategory.wall
                     player.physicsBody?.contactTestBitMask = PhysicsCategory.exit
                     node = player
                 } else if mapValue == 3 {
-                    node = SKSpriteNode(texture: exitTexture, size: CGSize(width: WALL_SIZE, height: WALL_SIZE))
+                    node = SKSpriteNode(texture: exitTexture, size: size)
                     node?.name = "exit"
-                    
-                    // Add physics body for contact detection (player wins when touching this)
-                    node?.physicsBody = SKPhysicsBody(rectangleOf: node!.size)
-                    node?.physicsBody?.isDynamic = false // Exit marker should not move
+                    node?.physicsBody = SKPhysicsBody(rectangleOf: size)
+                    node?.physicsBody?.isDynamic = false
                     node?.physicsBody?.categoryBitMask = PhysicsCategory.exit
+                } else if mapValue == 4 {
+                    let gift = GiftNode()
+                    gift.position = position
+                    gift.name = "gift"
+                    gift.remainingTime = giftRemainingTime
+                    giftRemainingTime += 5
+                    node = gift
                 }
                 
                 if let newNode = node {
@@ -251,8 +254,7 @@ extension GameScene {
         }
     }
     
-    func calculateOptimalWallSize() -> CGFloat {
-        
+    private func calculateOptimalWallSize() -> CGFloat {
         let totalCols = CGFloat(MAP_COLS)
         let totalRows = CGFloat(MAP_ROWS)
         
@@ -264,16 +266,37 @@ extension GameScene {
         let optimalSize = min(maxWallSizeByWidth, maxWallSizeByHeight) - 2.0
         return max(10.0, optimalSize)
     }
+    
+    private func isWall(at location: CGPoint) -> Bool {
+        let touchedNodes = mazeContainer.nodes(at: location)
+        return touchedNodes.contains(where: { $0.name == "wall" })
+    }
 }
 
 extension GameScene: SKPhysicsContactDelegate {
     func didBegin(_ contact: SKPhysicsContact) {
-        let first = contact.bodyA.categoryBitMask
-        let second = contact.bodyB.categoryBitMask
+        let bodyA = contact.bodyA
+        let bodyB = contact.bodyB
         
-        if first == PhysicsCategory.player && second == PhysicsCategory.exit ||
-            first == PhysicsCategory.exit && second == PhysicsCategory.player {
+        let categories = (bodyA.categoryBitMask, bodyB.categoryBitMask)
+        
+        // Player reached exit
+        if categories == (PhysicsCategory.player, PhysicsCategory.exit) ||
+            categories == (PhysicsCategory.exit, PhysicsCategory.player) {
             print("EXIT REACHED — LEVEL COMPLETE")
+            return
+        }
+        
+        // Player collects gift
+        if categories == (PhysicsCategory.player, PhysicsCategory.gift) ||
+            categories == (PhysicsCategory.gift, PhysicsCategory.player) {
+            
+            let giftNode = (bodyA.categoryBitMask == PhysicsCategory.gift)
+            ? bodyA.node
+            : bodyB.node
+            
+            giftNode?.removeFromParent()
+            print("GIFT COLLECTED 🎁")
         }
     }
 }
@@ -283,4 +306,5 @@ struct PhysicsCategory {
     static let player: UInt32 = 0b1 // 1
     static let wall: UInt32   = 0b10 // 2
     static let exit: UInt32   = 0b100 // 4
+    static let gift: UInt32    = 0b1000
 }
